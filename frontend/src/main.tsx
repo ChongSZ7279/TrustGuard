@@ -9,3 +9,10 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   </React.StrictMode>
 );
 
+// import { StaticPrototype } from './prototype/StaticPrototype';
+
+// ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+//   <React.StrictMode>
+//     <StaticPrototype />
+//   </React.StrictMode>
+// );

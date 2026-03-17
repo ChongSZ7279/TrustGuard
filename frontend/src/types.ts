@@ -20,3 +20,17 @@ export interface OverviewStats {
   fraud_rate: number;
 }
 
+export interface CheckTransactionResult {
+  decision: Decision;
+  risk_score: number;
+  reason?: string;
+  id?: number;
+  user_id?: string;
+  amount?: number;
+  merchant_id?: string;
+  location?: string;
+  device_id?: string;
+  timestamp?: string;
+}
+
+

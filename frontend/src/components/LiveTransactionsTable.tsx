@@ -2,6 +2,9 @@ import type { TransactionLogEntry, Decision } from '../types';
 
 interface Props {
   transactions: TransactionLogEntry[];
+  searchQuery: string;
+  onSearchChange: (value: string) => void;
+  decisionFilter: Decision | 'ALL';
 }
 
 const decisionClasses: Record<Decision, string> = {
@@ -10,12 +13,38 @@ const decisionClasses: Record<Decision, string> = {
   BLOCK: 'bg-block/10 text-block border-block/40'
 };
 
-export const LiveTransactionsTable: React.FC<Props> = ({ transactions }) => {
+export const LiveTransactionsTable: React.FC<Props> = ({
+  transactions,
+  searchQuery,
+  onSearchChange,
+  decisionFilter
+}) => {
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-900/60 overflow-hidden">
-      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-slate-200">Live Transaction Monitor</h2>
-        <span className="text-xs text-slate-500">Most recent first</span>
+      <div className="px-4 py-3 border-b border-slate-800 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-200">Live Transaction Monitor</h2>
+          <span className="text-xs text-slate-500">Most recent first • real-time digital wallet activity</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden sm:flex text-[11px] text-slate-400">
+            <span className="font-semibold mr-1">Decision filter:</span>
+            <span className="font-mono">
+              {decisionFilter === 'ALL' ? 'ALL' : decisionFilter}
+            </span>
+          </div>
+          <div className="relative">
+            <input
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              placeholder="Search user, merchant, ID..."
+              className="h-8 w-44 sm:w-56 rounded-md border border-slate-700 bg-slate-900/80 px-2.5 pr-6 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-sky-500 focus:border-sky-500"
+            />
+            <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center text-slate-500 text-[11px]">
+              ⌕
+            </span>
+          </div>
+        </div>
       </div>
       <div className="max-h-[360px] overflow-y-auto">
         <table className="min-w-full text-sm">
