@@ -5,13 +5,15 @@ TrustGuard is a lightweight, end-to-end prototype of a **real-time AI fraud dete
 ### 1. Architecture
 
 - **User Wallet / Super App** → sends transaction request
-- **FastAPI Fraud Service** (`/check-transaction`)
+- **FastAPI Fraud Service** (`/transactions` preferred, `/check-transaction` kept for compatibility)
 - **Behavioral Profiling Layer** – per-user baseline (amount, time, device, geolocation, merchants)
 - **ML Fraud Model** – XGBoost classifier trained with SMOTE + class weighting (optional but integrated)
 - **Risk Scoring Engine** – combines rules + ML probability into a unified **0–1 risk score**
 - **Decision Engine** – thresholds: **APPROVE / FLAG / BLOCK**
 - **Monitoring Dashboard** – React + Tailwind + Chart.js
-- **Optional Blockchain Fraud Registry** – Solidity contract for tamper-proof fraud records
+- **MongoDB Transaction Store** – persists current & today’s history
+- **Tamper-evident Ledger (“Mini Blockchain”)** – MongoDB ledger chain (hash-linked) per transaction
+- **Optional Blockchain Fraud Registry** – Solidity contract for tamper-proof fraud records (manual/demo stub)
 
 ### 2. Tech Stack
 
@@ -20,6 +22,7 @@ TrustGuard is a lightweight, end-to-end prototype of a **real-time AI fraud dete
 - **Frontend**: React (Vite), TailwindCSS, Chart.js (`react-chartjs-2`)
 - **Data**: any CSV fraud dataset (e.g. Kaggle: IEEE-CIS, Credit Card Fraud, PaySim, SAML-D)
 - **Database**: profiles and logs are in-memory for simplicity (can be swapped to MongoDB)
+- **Database (Demo)**: MongoDB is used to persist transactions, police blocklist, and ledger chain
 - **Blockchain (optional)**: Solidity contract `FraudRegistry.sol` deployable to an Ethereum testnet
 
 All components run **locally** using free tools (Python + Node.js + free public datasets).
@@ -45,12 +48,16 @@ python -m venv .venv
 .venv\Scripts\activate  # Windows PowerShell
 pip install -r requirements.txt
 
+set MONGODB_URI=mongodb://localhost:27017
+set MONGODB_DB=trustguard
+set POLICE_API_KEY=police-demo-key
+
 uvicorn app.main:app --reload --port 8000
 ```
 
 The API will be available at `http://localhost:8000` and docs at `http://localhost:8000/docs`.
 
-#### 3.2 Core endpoint – `/check-transaction`
+#### 3.2 Core endpoint – `/transactions` (persisted)
 
 - **Method**: `POST /check-transaction`
 - **Latency goal**: real-time, milliseconds on a single CPU core.
@@ -77,9 +84,16 @@ Example response (from `TransactionResponse`):
   "decision": "BLOCK",
   "reason": "High amount combined with risky IP; New device and different country/location detected; ML fraud probability=0.903",
   "latency_ms": 3.21,
-  "timestamp": "2026-03-05T03:20:31.123456+00:00"
+  "timestamp": "2026-03-05T03:20:31.123456+00:00",
+  "tx_id": "65f1f8c2d3e1...",
+  "ledger_hash": "0x..."
 }
 ```
+
+Recommended endpoint for the UI:
+
+- `POST /transactions` → scores + **stores in MongoDB** + returns `tx_id` + `ledger_hash`
+- `GET /transactions/today?user_id=...` → user history **today only**
 
 **Decision rules** (after combining rules + ML):
 
@@ -142,6 +156,12 @@ Directory: `backend/ml/`
 - **SMOTE** oversampling of minority (fraud) class
 - **class weighting** (`scale_pos_weight`) based on fraud ratio
 - **standard scaling** of numerical features
+
+Enable SMOTE (recommended for extreme imbalance):
+
+```bash
+python backend/ml/train_model.py --data-dir backend/ml/data --smote --smote-ratio 0.2 --smote-k 5
+```
 
 Usage (example with a Kaggle CSV):
 
@@ -223,6 +243,33 @@ The app polls the backend every **2 seconds** for:
 - `/stats/overview`
 - `/stats/recent?limit=50`
 - `/stats/risk-distribution`
+
+### 6. Police / Investigator Flow (Demo)
+
+The frontend includes a **Police / Investigator Console** (View 3).
+
+Backend endpoints (require header `X-Police-Key` matching `POLICE_API_KEY`):
+
+- `GET /police/transactions/today` → all transactions **today only**
+- `GET /police/blocked-users` → list blocked users
+- `POST /police/block-user` → block a user by `user_id` + reason
+
+Policy behavior:
+
+- If a user is blocked, `/transactions` and `/check-transaction` will always return `decision="BLOCK"` for that user.
+
+### 7. MongoDB + Ledger (“Mini Blockchain”)
+
+MongoDB collections:
+
+- `transactions`: every transaction attempt + risk decision
+- `blocked_users`: police blocklist
+- `ledger`: hash-linked ledger entries with `prev_hash` and `hash`
+
+Ledger properties:
+
+- Each transaction gets a `ledger_hash` that commits to the transaction fields + timestamp + `prev_hash`.
+- This makes the log **tamper-evident** (any mutation breaks the chain), suitable for audit trails in a trust system.
 
 ---
 

@@ -4,6 +4,7 @@ import { LiveTransactionsTable } from './components/LiveTransactionsTable';
 import { RiskCharts } from './components/RiskCharts';
 import { WalletView } from './components/WalletView';
 import { UserBehaviorDashboard } from './components/UserBehaviorDashboard';
+import { PolicePanel } from './components/PolicePanel';
 import { apiUrl } from './api';
 import type { Decision, OverviewStats, TransactionLogEntry } from './types';
 
@@ -166,6 +167,8 @@ function App() {
 
         {activeView === 'system-dashboard' && (
           <>
+            <PolicePanel />
+
             <OverviewPanel
               stats={overview}
               activeDecision={decisionFilter}
