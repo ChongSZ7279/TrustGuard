@@ -1,0 +1,13 @@
+# Node
+frontend/node_modules/
+
+frontend/build/
+frontend/dist/
+
+
+# Env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
