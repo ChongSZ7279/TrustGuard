@@ -4,6 +4,7 @@ import type { BlockedUserEntry, Decision, PersistedTransaction } from '../types'
 
 type PoliceTx = PersistedTransaction & {
   tx_id: string;
+  timestamp?: string;
 };
 
 const decisionClasses: Record<Decision, string> = {
@@ -17,7 +18,7 @@ export const PolicePanel: React.FC = () => {
   const [blockUserId, setBlockUserId] = useState<string>('');
   const [blockReason, setBlockReason] = useState<string>('Confirmed fraud / mule account');
   const [blocked, setBlocked] = useState<BlockedUserEntry[]>([]);
-  const [todayTx, setTodayTx] = useState<any[]>([]);
+  const [todayTx, setTodayTx] = useState<PoliceTx[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState<string>('');
 
@@ -54,7 +55,7 @@ export const PolicePanel: React.FC = () => {
   const filteredTx = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return todayTx;
-    return todayTx.filter((t: any) => {
+    return todayTx.filter((t) => {
       return (
         String(t.user_id ?? '').toLowerCase().includes(q) ||
         String(t.device_id ?? '').toLowerCase().includes(q) ||
@@ -65,6 +66,13 @@ export const PolicePanel: React.FC = () => {
       );
     });
   }, [todayTx, query]);
+
+  const liveAlerts: PoliceTx[] = useMemo(() => {
+    return [...todayTx]
+      .sort((a, b) => Number(b.risk_score ?? 0) - Number(a.risk_score ?? 0))
+      .filter((t) => (t.risk_score ?? 0) >= 0.8)
+      .slice(0, 10);
+  }, [todayTx]);
 
   const block = async () => {
     setError(null);
@@ -176,6 +184,40 @@ export const PolicePanel: React.FC = () => {
               Visibility limited to today by policy. Use search to find a user and block if needed.
             </div>
           </div>
+
+          <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/30 text-[11px]">
+            <div className="flex items-center justify-between">
+              <div className="font-semibold text-slate-200">High-risk alerts</div>
+              <div className="text-slate-500">risk ≥ 0.80</div>
+            </div>
+            <div className="mt-2 grid grid-cols-1 gap-2">
+              {liveAlerts.map((t) => (
+                <div key={t.tx_id} className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-mono text-slate-200">{t.user_id}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-slate-400">RM {Number(t.amount ?? 0).toFixed(2)}</span>
+                      <span
+                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
+                          decisionClasses[t.decision] ?? 'border-slate-700 text-slate-300'
+                        }`}
+                      >
+                        {t.decision}
+                      </span>
+                      <span className="font-mono text-slate-400">{Number(t.risk_score ?? 0).toFixed(2)}</span>
+                    </div>
+                  </div>
+                  {t.reason && (
+                    <div className="mt-1 text-slate-300 line-clamp-2" title={t.reason}>
+                      {t.reason}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {liveAlerts.length === 0 && <div className="text-slate-500">No high-risk alerts yet.</div>}
+            </div>
+          </div>
+
           <div className="max-h-[420px] overflow-y-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400">
@@ -184,12 +226,15 @@ export const PolicePanel: React.FC = () => {
                   <th className="px-3 py-2 text-left">User</th>
                   <th className="px-3 py-2 text-left">Amount</th>
                   <th className="px-3 py-2 text-left">Location</th>
+                  <th className="px-3 py-2 text-left">Device</th>
+                  <th className="px-3 py-2 text-left">Merchant</th>
+                  <th className="px-3 py-2 text-left">Why?</th>
                   <th className="px-3 py-2 text-left">Decision</th>
                   <th className="px-3 py-2 text-left">Risk</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredTx.map((t: any) => (
+                {filteredTx.map((t) => (
                   <tr key={String(t.tx_id)} className="border-t border-slate-800/80 hover:bg-slate-800/40">
                     <td className="px-3 py-2 text-slate-400">
                       {new Date(t.created_at ?? t.timestamp ?? new Date().toISOString()).toLocaleTimeString(undefined, {
@@ -199,6 +244,13 @@ export const PolicePanel: React.FC = () => {
                     <td className="px-3 py-2 font-mono text-slate-200">{t.user_id}</td>
                     <td className="px-3 py-2 font-semibold text-slate-100">RM {Number(t.amount ?? 0).toFixed(2)}</td>
                     <td className="px-3 py-2 text-slate-200">{t.location}</td>
+                    <td className="px-3 py-2 max-w-[140px] truncate text-slate-200" title={t.device_id}>
+                      {t.device_id}
+                    </td>
+                    <td className="px-3 py-2 text-slate-200">{t.merchant_id}</td>
+                    <td className="px-3 py-2 max-w-[260px] truncate text-[11px] text-slate-400" title={t.reason ?? ''}>
+                      {t.reason ? t.reason : <span className="text-slate-600">—</span>}
+                    </td>
                     <td className="px-3 py-2">
                       <span
                         className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
@@ -213,7 +265,7 @@ export const PolicePanel: React.FC = () => {
                 ))}
                 {filteredTx.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                    <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
                       No transactions yet today (or unauthorized).
                     </td>
                   </tr>
