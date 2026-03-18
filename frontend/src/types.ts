@@ -27,6 +27,7 @@ export interface CheckTransactionResult {
   latency_ms?: number;
   tx_id?: string;
   ledger_hash?: string;
+  model_loaded?: boolean;
   id?: number;
   user_id?: string;
   amount?: number;

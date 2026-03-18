@@ -13,8 +13,10 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
   const [amount, setAmount] = useState<string>('120');
   const [receiver, setReceiver] = useState<string>('Merchant123');
   const [device, setDevice] = useState<string>('iPhone 15');
+  const [deviceFingerprint, setDeviceFingerprint] = useState<string>('fp_demo_001');
   const [location, setLocation] = useState<string>('Johor Bahru');
   const [ipReputation, setIpReputation] = useState<string>('0.8');
+  const [ipAddress, setIpAddress] = useState<string>('203.0.113.13');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [result, setResult] = useState<CheckTransactionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -87,10 +89,33 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
         amount: Number(amount),
         merchant_id: receiver,
         device_id: device,
+        device_fingerprint: deviceFingerprint.trim() ? deviceFingerprint.trim() : null,
         location,
         time: `${hh}:${mm}`,
-        ip_reputation: Number(ipReputation)
+        ip_address: ipAddress.trim() ? ipAddress.trim() : null,
+        ip_reputation: ipReputation.trim() ? Number(ipReputation) : null
       };
+
+      // For a real-time checkout flow, score first (no persistence),
+      // then persist only if allowed (APPROVE/FLAG) so we don't disrupt UX.
+      const scoreRes = await fetch(apiUrl('/risk/score'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+
+      if (!scoreRes.ok) {
+        throw new Error('Risk score failed');
+      }
+
+      const scored = (await scoreRes.json()) as CheckTransactionResult;
+      setResult(scored);
+
+      // Persist to MongoDB ledger only if not BLOCKed (demo policy).
+      if (scored.decision === 'BLOCK') {
+        await refreshToday();
+        return;
+      }
 
       const res = await fetch(apiUrl('/transactions'), {
         method: 'POST',
@@ -106,7 +131,7 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
       setResult(json);
       await refreshToday();
     } catch (err) {
-      setError('Failed to reach /transactions – check that the FastAPI backend and MongoDB are running.');
+      setError('Failed to reach the backend – check that the FastAPI backend (and MongoDB for history) are running.');
     } finally {
       setIsSubmitting(false);
     }
@@ -162,7 +187,7 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
                   />
                 </label>
                 <label className="block text-slate-400">
-                  IP reputation
+                  IP reputation (optional)
                   <input
                     type="number"
                     min="0"
@@ -170,6 +195,25 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
                     step="0.1"
                     value={ipReputation}
                     onChange={(e) => setIpReputation(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-lg border border-slate-700 bg-slate-950/70 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block text-slate-400">
+                  IP address (optional)
+                  <input
+                    value={ipAddress}
+                    onChange={(e) => setIpAddress(e.target.value)}
+                    className="mt-1 w-full h-9 rounded-lg border border-slate-700 bg-slate-950/70 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
+                  />
+                </label>
+                <label className="block text-slate-400">
+                  Device fingerprint (optional)
+                  <input
+                    value={deviceFingerprint}
+                    onChange={(e) => setDeviceFingerprint(e.target.value)}
                     className="mt-1 w-full h-9 rounded-lg border border-slate-700 bg-slate-950/70 px-3 text-xs text-slate-100 focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                 </label>
@@ -228,6 +272,12 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
                       {result.decision === 'APPROVE' && <span className="text-approve">APPROVE</span>}
                       {result.decision === 'FLAG' && <span className="text-flag">FLAG</span>}
                       {result.decision === 'BLOCK' && <span className="text-block">BLOCK</span>}
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-slate-400">Scoring</div>
+                    <div className="text-[11px] text-slate-300">
+                      {result.model_loaded ? 'ML + rules' : 'rules only'}
                     </div>
                   </div>
                   {result.ledger_hash && (

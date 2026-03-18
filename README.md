@@ -72,8 +72,10 @@ Example request:
   "amount": 2500,
   "location": "Thailand",
   "device_id": "device_234",
+  "device_fingerprint": "fp_demo_001",
   "time": "03:20",
   "merchant_id": "M998",
+  "ip_address": "203.0.113.13",
   "ip_reputation": 0.8
 }
 ```
@@ -88,9 +90,19 @@ Example response (from `TransactionResponse`):
   "latency_ms": 3.21,
   "timestamp": "2026-03-05T03:20:31.123456+00:00",
   "tx_id": "65f1f8c2d3e1...",
-  "ledger_hash": "0x..."
+  "ledger_hash": "0x...",
+  "model_loaded": true
 }
 ```
+
+#### 3.2.1 Wallet-facing endpoint – `/risk/score` (no persistence)
+
+For a real **real-time checkout** flow (super-app / wallet), call:
+
+- `POST /risk/score` → returns an instant decision (**no DB write**)
+- if decision is not `BLOCK`, optionally call `POST /transactions` to persist for audit + dashboard
+
+This reduces user-facing latency and avoids writing blocked attempts unless you want an audit trail.
 
 Recommended endpoint for the UI:
 
@@ -165,16 +177,33 @@ Enable SMOTE (recommended for extreme imbalance):
 python backend/ml/train_model.py --data-dir backend/ml/data --smote --smote-ratio 0.2 --smote-k 5
 ```
 
-Usage (example with a Kaggle CSV):
+#### 4.1.1 Train from Kaggle / arbitrary CSV (column mapping)
+
+Many datasets (e.g. Kaggle Credit Card Fraud) have different schemas. Use:
+
+- `backend/ml/train_from_csv.py` → trains the **same real-time feature vector** used by the API:
+  - `amount`, `hour`, `ip_reputation`, `amount_ratio`, `is_new_device`, `is_new_location`
+
+Example (Kaggle Credit Card Fraud: columns `Time`, `Amount`, `Class`):
 
 ```bash
 cd backend
 .venv\Scripts\activate
 
-python -m ml.train_model --data path\to\your_dataset.csv --label-column is_fraud --output-dir backend/models
+python -m ml.train_from_csv ^
+  --data path\to\creditcard.csv ^
+  --amount-col Amount ^
+  --time-col Time ^
+  --label-col Class ^
+  --smote --smote-ratio 0.2
 ```
 
-The script will:
+Notes:
+
+- `python -m ml.train_model` is the **IEEE-CIS** trainer (expects `train_transaction.csv` + `train_identity.csv`).
+- `python -m ml.train_from_csv` is the **generic** trainer for Kaggle/custom CSV exports.
+
+Both trainers will:
 
 - load CSV, split into train/test
 - apply **SMOTE** to handle extreme class imbalance
@@ -282,6 +311,8 @@ This prototype demonstrates privacy-conscious design:
 - **Anonymised IDs**: only `user_id`, `device_id`, and `merchant_id` codes are used—no names or emails.
 - **Minimal data**: scores and metadata needed for fraud decisions; no unnecessary PII.
 - **In-memory profiles**: for demo, user behavior is held in memory; in production this would be encrypted at rest in a secure database (e.g. MongoDB with encryption).
+- **No raw IP persistence**: if `ip_address` is provided, the backend derives an `ip_reputation` score for risk and stores only `ip_hash` (deterministic hash) for telemetry/audit.
+- **No raw device fingerprint persistence**: if `device_fingerprint` is provided, the backend stores only `device_fingerprint_hash`.
 - **Secure transport**: in production, the same FastAPI app should be served **behind HTTPS** (reverse proxy like Nginx or a managed load balancer).
 - **Explainability**: every decision includes explicit reasons, enabling human review and bias checks.
 
@@ -372,7 +403,7 @@ You can train and test using public datasets (download manually from Kaggle or s
 Because schemas differ, you will typically:
 
 - map dataset columns (amount, time, device/IP features) into a common feature set
-- set the `--label-column` name to the fraud label (e.g. `Class`, `isFraud`, `is_fraud`)
+- set `--label-col` to the fraud label column (e.g. `Class`, `isFraud`, `is_fraud`)
 - optionally engineer additional contextual features for better accuracy
 
 All tooling (Python, Node, local chain / testnets, datasets) is available **for free**, making the solution suitable for hackathons, student projects, or early-stage pilots in ASEAN fintech ecosystems.

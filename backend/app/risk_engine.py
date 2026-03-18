@@ -104,6 +104,7 @@ class RiskEngine:
         amount: float,
         location: str,
         device_id: str,
+        device_fingerprint: Optional[str],
         time_str: str,
         merchant_id: str,
         ip_reputation: Optional[float],
@@ -118,6 +119,9 @@ class RiskEngine:
         features = {}
         reasons = []
         risk = 0.0
+
+        # Prefer a stable device fingerprint (if provided) for baseline comparisons.
+        device_key = device_fingerprint or device_id
 
         avg_amount = profile.avg_amount or 1.0
         amount_ratio = amount / max(avg_amount, 1.0)
@@ -143,7 +147,7 @@ class RiskEngine:
             reasons.append("Unusual location vs baseline")
 
         common_dev = profile.most_common_device()
-        if common_dev and device_id != common_dev:
+        if common_dev and device_key != common_dev:
             risk += 0.2
             reasons.append("New or rare device vs baseline")
 
@@ -164,7 +168,7 @@ class RiskEngine:
                 risk += 0.1
                 reasons.append("Moderate IP risk")
 
-        if common_dev and common_loc and device_id != common_dev and location != common_loc:
+        if common_dev and common_loc and device_key != common_dev and location != common_loc:
             risk += 0.2
             reasons.append("New device and different country/location detected")
 
@@ -179,7 +183,7 @@ class RiskEngine:
                 "hour": hour,
                 "ip_reputation": ip_reputation or 0.0,
                 "amount_ratio": amount_ratio,
-                "is_new_device": float(common_dev is not None and device_id != common_dev),
+                "is_new_device": float(common_dev is not None and device_key != common_dev),
                 "is_new_location": float(common_loc is not None and location != common_loc),
             }
             ml_prob = self._model.predict_proba(model_features)
@@ -202,7 +206,7 @@ class RiskEngine:
             risk = max(risk, 0.8)
             reasons.append("High amount combined with risky IP")
 
-        profile.update(amount=amount, hour=hour, location=location, device_id=device_id, merchant_id=merchant_id)
+        profile.update(amount=amount, hour=hour, location=location, device_id=device_key, merchant_id=merchant_id)
 
         if not reasons:
             reasons.append("Within normal behavioral baseline")

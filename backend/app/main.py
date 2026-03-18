@@ -7,11 +7,13 @@ from pydantic import BaseModel, Field
 from typing import Optional, Literal, List, Dict, Any
 from datetime import datetime, timezone
 from collections import deque
+from time import perf_counter
 
 from .risk_engine import RiskEngine, RiskDecision
 from .blockchain_registry import BlockchainRegistryClient, FraudRecord
 from .db import create_client, ensure_indexes, get_db, utc_now
 from .ledger import append_ledger_entry
+from .context_signals import ip_reputation_from_ip, stable_hash
 
 
 class TransactionRequest(BaseModel):
@@ -19,8 +21,14 @@ class TransactionRequest(BaseModel):
     amount: float
     location: str
     device_id: str
+    device_fingerprint: Optional[str] = Field(
+        None, description="Optional stable device fingerprint (hashed or raw in demo)."
+    )
     time: str = Field(..., description="HH:MM in 24h format (local user time)")
     merchant_id: str
+    ip_address: Optional[str] = Field(
+        None, description="Optional client IP (demo). Not persisted raw; only hashed for telemetry."
+    )
     ip_reputation: Optional[float] = Field(
         None, ge=0.0, le=1.0, description="0 (bad) → 1 (good)"
     )
@@ -34,6 +42,7 @@ class TransactionResponse(BaseModel):
     timestamp: datetime
     tx_id: Optional[str] = Field(None, description="MongoDB id (present when persisted)")
     ledger_hash: Optional[str] = Field(None, description="Tamper-evident ledger hash (present when persisted)")
+    model_loaded: bool = Field(..., description="Whether an ML model is loaded (else rule-only scoring).")
 
 
 class TransactionLogEntry(BaseModel):
@@ -123,10 +132,13 @@ def health_check():
     return {"status": "ok"}
 
 
-@app.post("/check-transaction", response_model=TransactionResponse)
-async def check_transaction(tx: TransactionRequest):
-    global _tx_counter
-    start = datetime.utcnow().replace(tzinfo=timezone.utc)
+@app.post("/risk/score", response_model=TransactionResponse)
+async def risk_score_only(tx: TransactionRequest):
+    """
+    Wallet-facing, low-latency scoring endpoint (no persistence).
+    Prefer this for real-time checkout decisions.
+    """
+    t0 = perf_counter()
 
     blocked = await _is_user_blocked(tx.user_id)
     if blocked is not None:
@@ -135,22 +147,71 @@ async def check_transaction(tx: TransactionRequest):
             risk_score=1.0,
             decision="BLOCK",
             reason=f"User is blocked by police: {blocked.get('reason', 'policy')}",
-            latency_ms=(now - start).total_seconds() * 1000.0,
+            latency_ms=(perf_counter() - t0) * 1000.0,
             timestamp=now,
+            model_loaded=risk_engine._model.is_loaded,  # demo visibility
         )
+
+    derived_ip_rep = tx.ip_reputation
+    if derived_ip_rep is None:
+        derived_ip_rep = ip_reputation_from_ip(tx.ip_address)
 
     result = risk_engine.score_transaction(
         user_id=tx.user_id,
         amount=tx.amount,
         location=tx.location,
         device_id=tx.device_id,
+        device_fingerprint=tx.device_fingerprint,
         time_str=tx.time,
         merchant_id=tx.merchant_id,
-        ip_reputation=tx.ip_reputation,
+        ip_reputation=derived_ip_rep,
     )
 
-    now = datetime.utcnow().replace(tzinfo=timezone.utc)
-    latency = (now - start).total_seconds() * 1000.0
+    now = utc_now()
+    return TransactionResponse(
+        risk_score=result.risk_score,
+        decision=result.decision,
+        reason=result.reason,
+        latency_ms=(perf_counter() - t0) * 1000.0,
+        timestamp=now,
+        model_loaded=risk_engine._model.is_loaded,  # demo visibility
+    )
+
+
+@app.post("/check-transaction", response_model=TransactionResponse)
+async def check_transaction(tx: TransactionRequest):
+    global _tx_counter
+    t0 = perf_counter()
+
+    blocked = await _is_user_blocked(tx.user_id)
+    if blocked is not None:
+        now = utc_now()
+        return TransactionResponse(
+            risk_score=1.0,
+            decision="BLOCK",
+            reason=f"User is blocked by police: {blocked.get('reason', 'policy')}",
+            latency_ms=(perf_counter() - t0) * 1000.0,
+            timestamp=now,
+            model_loaded=risk_engine._model.is_loaded,
+        )
+
+    derived_ip_rep = tx.ip_reputation
+    if derived_ip_rep is None:
+        derived_ip_rep = ip_reputation_from_ip(tx.ip_address)
+
+    result = risk_engine.score_transaction(
+        user_id=tx.user_id,
+        amount=tx.amount,
+        location=tx.location,
+        device_id=tx.device_id,
+        device_fingerprint=tx.device_fingerprint,
+        time_str=tx.time,
+        merchant_id=tx.merchant_id,
+        ip_reputation=derived_ip_rep,
+    )
+
+    now = utc_now()
+    latency = (perf_counter() - t0) * 1000.0
 
     _tx_counter += 1
     log_entry = TransactionLogEntry(
@@ -172,6 +233,7 @@ async def check_transaction(tx: TransactionRequest):
         reason=result.reason,
         latency_ms=latency,
         timestamp=now,
+        model_loaded=risk_engine._model.is_loaded,
     )
 
 
@@ -185,9 +247,10 @@ async def create_transaction(tx: TransactionRequest):
     """
     global _tx_counter
 
-    start = utc_now()
+    t0 = perf_counter()
 
     blocked = await _is_user_blocked(tx.user_id)
+    derived_ip_rep: Optional[float] = tx.ip_reputation
     if blocked is not None:
         now = utc_now()
         # Still persist the attempted transaction for audit trail
@@ -195,30 +258,39 @@ async def create_transaction(tx: TransactionRequest):
         result_risk = 1.0
         result_reason = f"User is blocked by police: {blocked.get('reason', 'policy')}"
     else:
+        if derived_ip_rep is None:
+            derived_ip_rep = ip_reputation_from_ip(tx.ip_address)
+
         result = risk_engine.score_transaction(
             user_id=tx.user_id,
             amount=tx.amount,
             location=tx.location,
             device_id=tx.device_id,
+            device_fingerprint=tx.device_fingerprint,
             time_str=tx.time,
             merchant_id=tx.merchant_id,
-            ip_reputation=tx.ip_reputation,
+            ip_reputation=derived_ip_rep,
         )
         result_decision = result.decision
         result_risk = result.risk_score
         result_reason = result.reason
 
     now = utc_now()
-    latency = (now - start).total_seconds() * 1000.0
+    latency = (perf_counter() - t0) * 1000.0
+
+    ip_hash = stable_hash(tx.ip_address, prefix="ip") if tx.ip_address else None
+    dev_fp_hash = stable_hash(tx.device_fingerprint, prefix="dev") if tx.device_fingerprint else None
 
     doc = {
         "user_id": tx.user_id,
         "amount": float(tx.amount),
         "location": tx.location,
         "device_id": tx.device_id,
+        "device_fingerprint_hash": dev_fp_hash,
         "merchant_id": tx.merchant_id,
         "time_str": tx.time,
-        "ip_reputation": tx.ip_reputation,
+        "ip_reputation": derived_ip_rep if blocked is None else tx.ip_reputation,
+        "ip_hash": ip_hash,
         "decision": result_decision,
         "risk_score": float(result_risk),
         "reason": result_reason,
@@ -267,6 +339,7 @@ async def create_transaction(tx: TransactionRequest):
         timestamp=now,
         tx_id=str(ins.inserted_id),
         ledger_hash=ledger_hash,
+        model_loaded=risk_engine._model.is_loaded,
     )
 
 

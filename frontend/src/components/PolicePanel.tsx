@@ -91,7 +91,7 @@ export const PolicePanel: React.FC = () => {
   };
 
   return (
-    <section className="space-y-6">
+    <section className="space-y-8">
       <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs">
         <h2 className="text-sm font-semibold text-slate-100">Police / Investigator Console</h2>
         <p className="text-slate-400">
@@ -125,6 +125,39 @@ export const PolicePanel: React.FC = () => {
         </div>
 
         {error && <div className="mt-3 text-[11px] text-amber-300">{error}</div>}
+      </div>
+
+      <div className="rounded-xl border border-rose-500/60 bg-rose-900/20 p-4 shadow-lg shadow-rose-500/20">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-sm font-semibold text-rose-200">🚨 Live Fraud Alerts</h3>
+          <div className="text-[11px] text-rose-200/70">risk ≥ 0.80 • latest 10</div>
+        </div>
+
+        <div className="mt-3 space-y-2 max-h-48 overflow-y-auto">
+          {liveAlerts.map((t) => (
+            <div key={t.tx_id} className="p-2 rounded-md border border-rose-700 bg-rose-950/40">
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-mono text-rose-100">{t.user_id}</div>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-rose-200/80">RM {Number(t.amount ?? 0).toFixed(2)}</span>
+                  <span className="font-mono text-rose-200/80">{Number(t.risk_score ?? 0).toFixed(2)}</span>
+                </div>
+              </div>
+              {t.reason && <div className="mt-1 text-[11px] text-rose-200/80 line-clamp-2">{t.reason}</div>}
+              <button
+                type="button"
+                onClick={() => {
+                  setBlockUserId(String(t.user_id));
+                  setBlockReason(t.reason ?? 'High risk activity detected');
+                }}
+                className="mt-2 h-7 rounded-md bg-rose-600 px-2 text-[11px] font-semibold text-white hover:bg-rose-500"
+              >
+                Block immediately
+              </button>
+            </div>
+          ))}
+          {liveAlerts.length === 0 && <div className="text-[11px] text-slate-400">No high-risk alerts right now.</div>}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -185,40 +218,7 @@ export const PolicePanel: React.FC = () => {
             </div>
           </div>
 
-          <div className="px-4 py-3 border-b border-slate-800 bg-slate-950/30 text-[11px]">
-            <div className="flex items-center justify-between">
-              <div className="font-semibold text-slate-200">High-risk alerts</div>
-              <div className="text-slate-500">risk ≥ 0.80</div>
-            </div>
-            <div className="mt-2 grid grid-cols-1 gap-2">
-              {liveAlerts.map((t) => (
-                <div key={t.tx_id} className="rounded-lg border border-slate-800 bg-slate-950/40 p-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="font-mono text-slate-200">{t.user_id}</div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-slate-400">RM {Number(t.amount ?? 0).toFixed(2)}</span>
-                      <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${
-                          decisionClasses[t.decision] ?? 'border-slate-700 text-slate-300'
-                        }`}
-                      >
-                        {t.decision}
-                      </span>
-                      <span className="font-mono text-slate-400">{Number(t.risk_score ?? 0).toFixed(2)}</span>
-                    </div>
-                  </div>
-                  {t.reason && (
-                    <div className="mt-1 text-slate-300 line-clamp-2" title={t.reason}>
-                      {t.reason}
-                    </div>
-                  )}
-                </div>
-              ))}
-              {liveAlerts.length === 0 && <div className="text-slate-500">No high-risk alerts yet.</div>}
-            </div>
-          </div>
-
-          <div className="max-h-[420px] overflow-y-auto">
+          <div className="max-h-[360px] overflow-y-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-slate-900/80 sticky top-0 z-10 text-slate-400">
                 <tr>

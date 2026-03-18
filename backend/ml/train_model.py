@@ -67,6 +67,7 @@ def _engineer_realtime_features(merged: pd.DataFrame) -> pd.DataFrame:
     Produce features that match what `backend/app/risk_engine.py` sends to the ML model:
       - amount
       - hour
+      - ip_reputation
       - amount_ratio
       - is_new_device
       - is_new_location
@@ -127,7 +128,11 @@ def _engineer_realtime_features(merged: pd.DataFrame) -> pd.DataFrame:
         df["is_new_location"] = 0.0
 
     # Keep only real-time features and label (others are "unused data")
-    keep = ["amount", "hour", "amount_ratio", "is_new_device", "is_new_location"]
+    # NOTE: IEEE-CIS doesn't include an explicit IP reputation score. We keep the feature anyway
+    # so the real-time service can pass a meaningful contextual signal at inference time.
+    df["ip_reputation"] = 0.5
+
+    keep = ["amount", "hour", "ip_reputation", "amount_ratio", "is_new_device", "is_new_location"]
     out = df[keep].copy()
 
     # Ensure finite values for downstream scaler/model

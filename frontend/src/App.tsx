@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { OverviewPanel } from './components/OverviewPanel';
-import { LiveTransactionsTable } from './components/LiveTransactionsTable';
 import { RiskCharts } from './components/RiskCharts';
 import { WalletView } from './components/WalletView';
 import { UserBehaviorDashboard } from './components/UserBehaviorDashboard';
@@ -97,7 +96,7 @@ function App() {
             </p>
           </div>
           <div className="text-right text-xs text-slate-400">
-            <div className="font-mono">API: /check-transaction</div>
+            <div className="font-mono">API: /risk/score</div>
             <div>Anonymized, privacy-first monitoring</div>
           </div>
         </div>
@@ -169,30 +168,20 @@ function App() {
           <>
             <PolicePanel />
 
-            <OverviewPanel
-              stats={overview}
-              activeDecision={decisionFilter}
-              onDecisionChange={setDecisionFilter}
-            />
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <LiveTransactionsTable
-                  transactions={filteredTransactions}
-                  searchQuery={searchQuery}
-                  onSearchChange={setSearchQuery}
-                  decisionFilter={decisionFilter}
-                />
-              </div>
-              <div className="lg:col-span-1">
-                <RiskCharts riskBuckets={riskBuckets} />
-              </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <OverviewPanel
+                stats={overview}
+                activeDecision={decisionFilter}
+                onDecisionChange={setDecisionFilter}
+              />
+              <RiskCharts riskBuckets={riskBuckets} />
             </div>
 
             <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 text-xs text-slate-300 space-y-2">
               <h2 className="text-sm font-semibold text-slate-100">Demo scenario</h2>
               <ol className="list-decimal list-inside space-y-1">
                 <li>Send a normal transaction via POST `/check-transaction` → expected decision: APPROVE.</li>
+                <li>Wallet flow: POST `/risk/score` first, then persist via POST `/transactions` if not BLOCKed.</li>
                 <li>Send a slightly unusual transaction (new merchant / time) → expected decision: FLAG.</li>
                 <li>
                   Send a high-risk transaction (large amount, new device, overseas, bad IP) → expected decision: BLOCK.
