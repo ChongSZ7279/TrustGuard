@@ -1,3 +1,5 @@
 backend/ml/paysim.csv filter=lfs diff=lfs merge=lfs -text
 backend/ml/data/test_transaction.csv filter=lfs diff=lfs merge=lfs -text
 backend/ml/data/train_transaction.csv filter=lfs diff=lfs merge=lfs -text
+backend/ml/data/test_identity.csv filter=lfs diff=lfs merge=lfs -text
+backend/ml/data/train_identity.csv filter=lfs diff=lfs merge=lfs -text
