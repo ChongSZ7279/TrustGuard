@@ -39,7 +39,15 @@ def _read_csv_safely(path: Path, usecols: Optional[Iterable[str]] = None) -> pd.
     last_err: Optional[Exception] = None
     for enc in encodings:
         try:
-            return pd.read_csv(path, usecols=usecols, encoding=enc, low_memory=False)
+            # Use low_memory + on_bad_lines='skip' to reduce RAM pressure and
+            # avoid failing on a small number of malformed rows in very large CSVs.
+            return pd.read_csv(
+                path,
+                usecols=usecols,
+                encoding=enc,
+                low_memory=True,
+                on_bad_lines="skip",
+            )
         except Exception as e:
             last_err = e
     raise RuntimeError(f"Failed to read CSV {path} with tried encodings: {encodings}") from last_err

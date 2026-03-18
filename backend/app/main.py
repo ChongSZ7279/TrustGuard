@@ -162,10 +162,27 @@ def _police_api_key() -> str:
     return os.getenv("POLICE_API_KEY", "police-demo-key")
 
 
-def _require_police(x_police_key: Optional[str]) -> str:
-    if not x_police_key or x_police_key != _police_api_key():
-        raise HTTPException(status_code=401, detail="Unauthorized (police key required)")
-    return "police"
+def _police_bearer_token() -> str:
+    return os.getenv("POLICE_BEARER_TOKEN", "police-demo-token")
+
+
+def _require_police(x_police_key: Optional[str], authorization: Optional[str] = None) -> str:
+    """
+    Simple auth layer for police endpoints.
+
+    Preferred: Authorization: Bearer <POLICE_BEARER_TOKEN>
+    Legacy/demo: X-Police-Key: <POLICE_API_KEY>
+    """
+    bearer = _police_bearer_token()
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+        if token and token == bearer:
+            return "police"
+
+    if x_police_key and x_police_key == _police_api_key():
+        return "police"
+
+    raise HTTPException(status_code=401, detail="Unauthorized (police credentials required)")
 
 
 def _utc_day_range(now: datetime):
@@ -432,8 +449,9 @@ async def list_my_transactions_today(user_id: str, limit: int = 50):
 async def police_list_transactions_today(
     limit: int = 200,
     x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
 ):
-    _require_police(x_police_key)
+    _require_police(x_police_key, authorization)
     now = utc_now()
     start, end = _utc_day_range(now)
     db = app.state.db
@@ -448,8 +466,12 @@ async def police_list_transactions_today(
 
 
 @app.post("/police/block-user")
-async def police_block_user(req: PoliceBlockUserRequest, x_police_key: Optional[str] = Header(None)):
-    blocked_by = _require_police(x_police_key)
+async def police_block_user(
+    req: PoliceBlockUserRequest,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    blocked_by = _require_police(x_police_key, authorization)
     db = app.state.db
     now = utc_now()
     await db.blocked_users.update_one(
@@ -461,8 +483,12 @@ async def police_block_user(req: PoliceBlockUserRequest, x_police_key: Optional[
 
 
 @app.get("/police/blocked-users")
-async def police_list_blocked_users(x_police_key: Optional[str] = Header(None), limit: int = 200):
-    _require_police(x_police_key)
+async def police_list_blocked_users(
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+    limit: int = 200,
+):
+    _require_police(x_police_key, authorization)
     db = app.state.db
     cursor = db.blocked_users.find({}).sort("blocked_at", -1).limit(max(1, min(limit, 500)))
     out = []

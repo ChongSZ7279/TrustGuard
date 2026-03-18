@@ -50,8 +50,8 @@ pip install -r requirements.txt
 
 set MONGODB_URI=mongodb://localhost:27017
 set MONGODB_DB=trustguard
-set POLICE_BEARER_TOKEN=police-demo-token
-set POLICE_API_KEY=police-demo-key
+set POLICE_BEARER_TOKEN=police-demo-token  # used by Police console (Authorization: Bearer ...)
+set POLICE_API_KEY=police-demo-key         # optional legacy header fallback (X-Police-Key)
 set USE_MONGO_BASELINES=1
 
 uvicorn app.main:app --reload --port 8000
@@ -287,7 +287,7 @@ The app polls the backend every **2 seconds** for:
 
 The frontend includes a **Police / Investigator Console** (View 3).
 
-Backend endpoints (prefer `Authorization: Bearer <token>` matching `POLICE_BEARER_TOKEN`; `X-Police-Key` is kept as a legacy/demo fallback):
+Backend endpoints (prefer `Authorization: Bearer <token>` matching `POLICE_BEARER_TOKEN`; `X-Police-Key` is kept as a legacy/demo fallback and is no longer hard-coded in the frontend):
 
 - `GET /police/transactions/today` → all transactions **today only**
 - `GET /police/blocked-users` → list blocked users
