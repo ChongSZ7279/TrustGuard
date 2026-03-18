@@ -430,9 +430,79 @@ def stats_overview() -> Dict[str, Any]:
     }
 
 
+@app.get("/stats/overview-today")
+async def stats_overview_today() -> Dict[str, Any]:
+    """
+    MongoDB-backed stats for today's persisted transactions.
+    Use this for dashboards so data survives backend restarts.
+    """
+    now = utc_now()
+    start, end = _utc_day_range(now)
+    db = app.state.db
+
+    total = 0
+    blocked = 0
+    flagged = 0
+    approved = 0
+
+    cursor = db.transactions.find({"created_at": {"$gte": start, "$lte": end}}, {"decision": 1})
+    async for doc in cursor:
+        total += 1
+        d = doc.get("decision")
+        if d == "BLOCK":
+            blocked += 1
+        elif d == "FLAG":
+            flagged += 1
+        elif d == "APPROVE":
+            approved += 1
+
+    fraud_rate = (blocked / total) if total > 0 else 0.0
+    return {
+        "total_transactions": total,
+        "blocked": blocked,
+        "flagged": flagged,
+        "approved": approved,
+        "fraud_rate": round(fraud_rate, 4),
+    }
+
+
 @app.get("/stats/recent")
 def stats_recent(limit: int = 50) -> List[TransactionLogEntry]:
     return list(list(_tx_log)[: max(0, min(limit, len(_tx_log)))])
+
+
+@app.get("/stats/recent-today")
+async def stats_recent_today(limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    MongoDB-backed recent transactions (today only).
+    Returns a lightweight list similar to /stats/recent.
+    """
+    now = utc_now()
+    start, end = _utc_day_range(now)
+    db = app.state.db
+    cursor = (
+        db.transactions.find({"created_at": {"$gte": start, "$lte": end}})
+        .sort("created_at", -1)
+        .limit(max(1, min(limit, 200)))
+    )
+    out: List[Dict[str, Any]] = []
+    i = 0
+    async for doc in cursor:
+        i += 1
+        out.append(
+            {
+                "id": i,
+                "user_id": doc.get("user_id"),
+                "amount": float(doc.get("amount", 0.0)),
+                "location": doc.get("location", ""),
+                "device_id": doc.get("device_id", ""),
+                "merchant_id": doc.get("merchant_id", ""),
+                "decision": doc.get("decision", "APPROVE"),
+                "risk_score": float(doc.get("risk_score", 0.0)),
+                "timestamp": doc.get("created_at", now).isoformat(),
+            }
+        )
+    return out
 
 
 @app.get("/stats/risk-distribution")
@@ -442,6 +512,28 @@ def stats_risk_distribution(buckets: int = 10):
         idx = min(buckets - 1, int(t.risk_score * buckets))
         counts[idx] += 1
     return {"buckets": buckets, "counts": counts}
+
+
+@app.get("/stats/risk-distribution-today")
+async def stats_risk_distribution_today(buckets: int = 10):
+    """
+    MongoDB-backed risk distribution for today's persisted transactions.
+    """
+    b = max(2, min(int(buckets), 50))
+    counts = [0] * b
+    now = utc_now()
+    start, end = _utc_day_range(now)
+    db = app.state.db
+    cursor = db.transactions.find({"created_at": {"$gte": start, "$lte": end}}, {"risk_score": 1})
+    async for doc in cursor:
+        try:
+            r = float(doc.get("risk_score", 0.0))
+        except Exception:
+            r = 0.0
+        r = max(0.0, min(1.0, r))
+        idx = min(b - 1, int(r * b))
+        counts[idx] += 1
+    return {"buckets": b, "counts": counts}
 
 
 @app.post("/fraud/report-on-chain")

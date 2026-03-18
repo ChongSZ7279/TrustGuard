@@ -229,6 +229,14 @@ If no model file is found, the engine **falls back to pure rules** so the API st
 
 You can plug in **PyOD anomaly detectors** in parallel to model rare-account activity (e.g. Isolation Forest, COPOD) using the same feature dictionary.
 
+#### 4.3 End-to-end case study mapping (training → API → wallet UX)
+
+- **Behavioral profiling**: `backend/app/risk_engine.py` maintains a per-user baseline (amount, time-of-day, device, location, merchants).
+- **Real-time anomaly scoring**: `POST /risk/score` returns **APPROVE / FLAG / BLOCK** with `latency_ms` (milliseconds) and a human-readable `reason`.
+- **Imbalanced fraud handling**: training scripts support **SMOTE** and class weighting; output is `backend/models/fraud_xgb_model.joblib`.
+- **Contextual signals**: the API accepts `ip_reputation` or `ip_address` (derived to a reputation score) and optional `device_fingerprint`.
+- **Privacy-first**: only hashed contextual identifiers are stored (`ip_hash`, `device_fingerprint_hash`); dashboards default to **today-only** visibility.
+
 ---
 
 ### 5. Frontend – Fraud Monitoring Dashboard
@@ -271,9 +279,9 @@ The dashboard runs at `http://localhost:5173` and calls the backend at `VITE_API
 
 The app polls the backend every **2 seconds** for:
 
-- `/stats/overview`
-- `/stats/recent?limit=50`
-- `/stats/risk-distribution`
+- `/stats/overview-today`
+- `/stats/recent-today?limit=50`
+- `/stats/risk-distribution-today`
 
 ### 6. Police / Investigator Flow (Demo)
 

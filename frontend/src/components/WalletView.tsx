@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { CheckTransactionResult, PersistedTransaction, TransactionLogEntry } from '../types';
 import { apiUrl } from '../api';
 import { PhoneFrame } from './PhoneFrame';
+import logo from '../image/image.png';
 
 interface Props {
   walletId: string;
@@ -163,7 +164,14 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
           <div className="p-4 text-xs space-y-4">
             <div className="flex items-start justify-between">
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-slate-400">TrustGuard Wallet</div>
+                <div className="flex items-center gap-2">
+                  <img
+                    src={logo}
+                    alt="TrustGuard"
+                    className="h-7 w-7 rounded-lg border border-slate-800 bg-white/5 object-contain"
+                  />
+                  <div className="text-[11px] uppercase tracking-wide text-slate-400">TrustGuard Wallet</div>
+                </div>
                 <div className="text-sm font-semibold text-slate-100">Send Money</div>
                 <div className="text-[11px] text-slate-400">Real-time fraud shield for the unbanked</div>
               </div>
