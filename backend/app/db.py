@@ -36,6 +36,10 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.blocked_users.create_index("user_id", unique=True)
     await db.blocked_users.create_index([("blocked_at", -1)])
 
+    # Wallet users: lookup by user_id, sort by updated time
+    await db.wallet_users.create_index("user_id", unique=True)
+    await db.wallet_users.create_index([("updated_at", -1)])
+
     # Ledger: sequential index, plus tx reference
     await db.ledger.create_index("index", unique=True)
     await db.ledger.create_index([("created_at", -1)])

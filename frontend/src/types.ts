@@ -28,6 +28,8 @@ export interface CheckTransactionResult {
   tx_id?: string;
   ledger_hash?: string;
   model_loaded?: boolean;
+  balance_before?: number;
+  balance_after?: number;
   id?: number;
   user_id?: string;
   amount?: number;
@@ -59,6 +61,17 @@ export interface BlockedUserEntry {
   reason: string;
   blocked_at: string;
   blocked_by: string;
+}
+
+export interface WalletUser {
+  user_id: string;
+  display_name: string;
+  balance: number;
+  currency: string;
+  primary_device: string;
+  device_fingerprint: string;
+  location: string;
+  updated_at: string;
 }
 
 

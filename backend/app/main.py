@@ -43,6 +43,8 @@ class TransactionResponse(BaseModel):
     tx_id: Optional[str] = Field(None, description="MongoDB id (present when persisted)")
     ledger_hash: Optional[str] = Field(None, description="Tamper-evident ledger hash (present when persisted)")
     model_loaded: bool = Field(..., description="Whether an ML model is loaded (else rule-only scoring).")
+    balance_before: Optional[float] = Field(None, description="Wallet balance before this transaction (if wallet DB enabled).")
+    balance_after: Optional[float] = Field(None, description="Wallet balance after this transaction (if wallet DB enabled).")
 
 
 class TransactionLogEntry(BaseModel):
@@ -68,6 +70,43 @@ class BlockedUserEntry(BaseModel):
     reason: str
     blocked_at: datetime
     blocked_by: str
+
+
+class WalletUserResponse(BaseModel):
+    user_id: str
+    display_name: str
+    balance: float
+    currency: str = "RM"
+    primary_device: str
+    device_fingerprint: str
+    location: str
+    updated_at: datetime
+
+
+def _default_wallet_user(user_id: str) -> Dict[str, Any]:
+    # Fake-but-consistent defaults to make the UI feel real.
+    suffix = user_id.split("_")[-1] if "_" in user_id else user_id[-3:]
+    return {
+        "user_id": user_id,
+        "display_name": f"User {suffix}",
+        "balance": 1240.50,
+        "currency": "RM",
+        "primary_device": "iPhone 15",
+        "device_fingerprint": f"fp_demo_{suffix.zfill(3)}",
+        "location": "Johor Bahru",
+        "updated_at": utc_now(),
+    }
+
+
+async def _get_or_create_wallet_user(user_id: str) -> Dict[str, Any]:
+    db = app.state.db
+    existing = await db.wallet_users.find_one({"user_id": user_id})
+    if existing is not None:
+        existing.pop("_id", None)
+        return existing
+    doc = _default_wallet_user(user_id)
+    await db.wallet_users.insert_one(doc)
+    return doc
 
 
 app = FastAPI(
@@ -103,6 +142,20 @@ async def _shutdown():
     client = getattr(app.state, "mongo_client", None)
     if client is not None:
         client.close()
+
+
+@app.get("/wallet/{user_id}", response_model=WalletUserResponse)
+async def get_wallet_user(user_id: str):
+    doc = await _get_or_create_wallet_user(user_id)
+    return doc
+
+
+@app.post("/wallet/{user_id}/reset", response_model=WalletUserResponse)
+async def reset_wallet_user(user_id: str):
+    db = app.state.db
+    doc = _default_wallet_user(user_id)
+    await db.wallet_users.update_one({"user_id": user_id}, {"$set": doc}, upsert=True)
+    return doc
 
 
 def _police_api_key() -> str:
@@ -251,6 +304,9 @@ async def create_transaction(tx: TransactionRequest):
 
     blocked = await _is_user_blocked(tx.user_id)
     derived_ip_rep: Optional[float] = tx.ip_reputation
+    wallet_user = await _get_or_create_wallet_user(tx.user_id)
+    balance_before = float(wallet_user.get("balance", 0.0))
+    balance_after: Optional[float] = None
     if blocked is not None:
         now = utc_now()
         # Still persist the attempted transaction for audit trail
@@ -274,6 +330,14 @@ async def create_transaction(tx: TransactionRequest):
         result_decision = result.decision
         result_risk = result.risk_score
         result_reason = result.reason
+        if result_decision != "BLOCK":
+            balance_after = max(0.0, balance_before - float(tx.amount))
+            db = app.state.db
+            await db.wallet_users.update_one(
+                {"user_id": tx.user_id},
+                {"$set": {"balance": balance_after, "updated_at": utc_now()}},
+                upsert=True,
+            )
 
     now = utc_now()
     latency = (perf_counter() - t0) * 1000.0
@@ -295,6 +359,8 @@ async def create_transaction(tx: TransactionRequest):
         "risk_score": float(result_risk),
         "reason": result_reason,
         "latency_ms": float(latency),
+        "balance_before": float(balance_before),
+        "balance_after": float(balance_after) if balance_after is not None else None,
         "created_at": now,
     }
 
@@ -340,6 +406,8 @@ async def create_transaction(tx: TransactionRequest):
         tx_id=str(ins.inserted_id),
         ledger_hash=ledger_hash,
         model_loaded=risk_engine._model.is_loaded,
+        balance_before=float(balance_before),
+        balance_after=float(balance_after) if balance_after is not None else None,
     )
 
 

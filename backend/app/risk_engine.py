@@ -189,7 +189,11 @@ class RiskEngine:
             ml_prob = self._model.predict_proba(model_features)
             if ml_prob is not None:
                 reasons.append(f"ML fraud probability={ml_prob:.3f}")
-                risk = 0.6 * ml_prob + 0.4 * risk
+                # Cold-start damping: on the first few transactions we down-weight ML to avoid
+                # overly aggressive flags when a user has no behavioral history yet.
+                ml_weight = 0.6 if profile.tx_count >= 5 else 0.25
+                ml_prob = max(0.0, min(1.0, float(ml_prob)))
+                risk = ml_weight * ml_prob + (1.0 - ml_weight) * risk
 
         risk = max(0.0, min(1.0, risk))
 
