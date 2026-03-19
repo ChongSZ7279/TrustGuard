@@ -394,6 +394,13 @@ API endpoint:
 - Computes a transaction hash
 - Returns the hash that can be submitted to the smart contract
 
+#### 7.3 Proof export & ledger verification
+
+To make use of the proof fields stored per transaction (`ledger_hash`, `ledger_index`, `ledger_prev_hash`, `registry_tx_hash`), the repo includes helper scripts:
+
+- `backend/blockchain/verify_ledger_chain.py` checks that the MongoDB `ledger` chain is consistent.
+- `backend/blockchain/export_blocked_registry_hashes.py` exports blocked transactions with `registry_tx_hash` into JSONL (`transactionHash`, `riskScoreBps`) for submission to `FraudRegistry.sol`.
+
 This enables:
 
 - **tamper-proof fraud intelligence**
