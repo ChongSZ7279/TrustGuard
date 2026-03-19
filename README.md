@@ -349,13 +349,18 @@ This prototype demonstrates privacy-conscious design:
 
 ---
 
-### 7. Optional Innovation – Blockchain Fraud Registry
+### 7. Optional On-Chain Fraud Registry (FraudRegistry.sol)
 
-Files:
+To avoid confusion, this project has **two** “proof” layers:
 
-- Solidity contract: `blockchain/FraudRegistry.sol`
-- Backend stub: `backend/app/blockchain_registry.py`
-- API hook: `POST /fraud/report-on-chain`
+1. **Default proof (always used): MongoDB mini-ledger**
+   - This is the tamper-evident evidence in the demo.
+   - It uses a hash-linked chain in MongoDB (`ledger` collection) and stores references in each transaction (e.g. `ledger_hash`, `ledger_index`, `ledger_prev_hash`).
+
+2. **Optional public proof (only if deployed/submitted): FraudRegistry.sol**
+   - `blockchain/FraudRegistry.sol` stores only hashes on-chain.
+   - Your backend currently does **not** automatically submit reports on-chain by default.
+   - If you deploy the contract to a testnet and then submit the exported `transactionHash` + `riskScoreBps`, those fraud reports become publicly verifiable.
 
 #### 7.1 Smart contract
 
@@ -367,44 +372,29 @@ Files:
 Each report stores:
 
 - `txHash` (transaction hash)
-- `riskScoreBps` (risk score in basis points, 0–10,000)
+- `riskScoreBps` (0–10,000)
 - `timestamp`
 
-Deploy this contract to an **Ethereum testnet** (e.g. Sepolia) using free tools like:
+#### 7.2 What “on-chain” means in this repo
 
-- Remix IDE
-- Hardhat + a free RPC provider
-
-#### 7.2 Backend integration (optional)
-
-`BlockchainRegistryClient` is an opt-in stub:
-
-- Computes a deterministic **SHA-256 transaction hash** from:
-  - user_id (anonymised)
-  - amount
-  - device_id
-  - timestamp
-- Can be wired to a real `web3.py` client to call `reportFraud`.
-- Disabled by default to avoid key/RPC management in this demo.
-
-API endpoint:
-
-- `POST /fraud/report-on-chain?tx_id={id}`
-- Looks up a **BLOCK** decision in the in-memory log
-- Computes a transaction hash
-- Returns the hash that can be submitted to the smart contract
+- A persisted transaction includes `registry_tx_hash` (a deterministic `0x...` hash).
+- That value is intended to be used as the contract’s `transactionHash` input.
+- Your demo is still **tamper-evident** even without deploying the contract, because the mini-ledger proof is already stored and hash-linked in MongoDB.
 
 #### 7.3 Proof export & ledger verification
 
-To make use of the proof fields stored per transaction (`ledger_hash`, `ledger_index`, `ledger_prev_hash`, `registry_tx_hash`), the repo includes helper scripts:
+Helper scripts included:
 
-- `backend/blockchain/verify_ledger_chain.py` checks that the MongoDB `ledger` chain is consistent.
-- `backend/blockchain/export_blocked_registry_hashes.py` exports blocked transactions with `registry_tx_hash` into JSONL (`transactionHash`, `riskScoreBps`) for submission to `FraudRegistry.sol`.
+- `backend/blockchain/verify_ledger_chain.py`
+  - verifies MongoDB `ledger` hash chaining is consistent.
+- `backend/blockchain/export_blocked_registry_hashes.py`
+  - exports blocked transactions that already have `registry_tx_hash` into JSONL (`transactionHash`, `riskScoreBps`).
+  - you can submit those exported hashes to `FraudRegistry.sol` manually (e.g. with Remix).
 
 This enables:
 
-- **tamper-proof fraud intelligence**
-- **cross-platform sharing of confirmed fraud cases**
+- **tamper-evident evidence inside the system** (mini-ledger)
+- **optional cross-platform public verification** (on-chain registry)
 
 ---
 
@@ -424,8 +414,7 @@ This enables:
 6. **Explainability**  
    - Show `reason` field from API / dashboard to explain **why** each transaction was suspicious.
 7. **Optional on-chain registry**  
-   - Pick a blocked transaction ID from the dashboard and call `/fraud/report-on-chain?tx_id=...`.  
-   - Use the returned `transaction_hash` with the Solidity contract to create a tamper-proof record.
+   - Pick a blocked transaction, export its on-chain-ready proof using `backend/blockchain/export_blocked_registry_hashes.py`, then submit `transactionHash` + `riskScoreBps` to `FraudRegistry.sol` on a testnet (e.g. via Remix).
 
 ---
 
