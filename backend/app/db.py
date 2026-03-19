@@ -44,3 +44,9 @@ async def ensure_indexes(db: AsyncIOMotorDatabase) -> None:
     await db.ledger.create_index("index", unique=True)
     await db.ledger.create_index([("created_at", -1)])
 
+    # Police tickets: queue by status/priority/updated time
+    await db.police_tickets.create_index("ticket_id", unique=True)
+    await db.police_tickets.create_index([("status", 1), ("priority", -1), ("updated_at", -1)])
+    await db.police_tickets.create_index([("tx_id", 1)])
+    await db.police_tickets.create_index([("assigned_to", 1), ("updated_at", -1)])
+

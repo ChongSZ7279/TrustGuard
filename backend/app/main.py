@@ -8,6 +8,8 @@ from typing import Optional, Literal, List, Dict, Any
 from datetime import datetime, timezone
 from collections import deque
 from time import perf_counter
+from bson import ObjectId
+import random
 
 from .risk_engine import RiskEngine, RiskDecision
 from .blockchain_registry import BlockchainRegistryClient, FraudRecord
@@ -42,6 +44,12 @@ class TransactionResponse(BaseModel):
     timestamp: datetime
     tx_id: Optional[str] = Field(None, description="MongoDB id (present when persisted)")
     ledger_hash: Optional[str] = Field(None, description="Tamper-evident ledger hash (present when persisted)")
+    ledger_index: Optional[int] = Field(None, description="Ledger block index (present when persisted)")
+    ledger_prev_hash: Optional[str] = Field(None, description="Ledger prev_hash (present when persisted)")
+    registry_tx_hash: Optional[str] = Field(
+        None,
+        description="Deterministic transaction hash (can be submitted to an on-chain registry)",
+    )
     model_loaded: bool = Field(..., description="Whether an ML model is loaded (else rule-only scoring).")
     balance_before: Optional[float] = Field(None, description="Wallet balance before this transaction (if wallet DB enabled).")
     balance_after: Optional[float] = Field(None, description="Wallet balance after this transaction (if wallet DB enabled).")
@@ -63,6 +71,37 @@ class TransactionLogEntry(BaseModel):
 class PoliceBlockUserRequest(BaseModel):
     user_id: str
     reason: str = Field(..., min_length=3, max_length=500)
+
+class PoliceUnblockUserRequest(BaseModel):
+    user_id: str
+
+
+class PoliceCreateTicketRequest(BaseModel):
+    tx_id: str = Field(..., description="MongoDB transaction id (tx_id)")
+    assigned_to: str = Field(..., min_length=1, max_length=64)
+    notes: str = Field("", max_length=500)
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
+
+
+class PoliceUpdateTicketRequest(BaseModel):
+    status: Optional[Literal["OPEN", "IN_PROGRESS", "RESOLVED"]] = None
+    assigned_to: Optional[str] = Field(None, max_length=64)
+    notes: Optional[str] = Field(None, max_length=500)
+    priority: Optional[Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]] = None
+
+
+class PoliceTicket(BaseModel):
+    ticket_id: str
+    tx_id: str
+    user_id: str
+    device_id: str
+    status: Literal["OPEN", "IN_PROGRESS", "RESOLVED"]
+    priority: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
+    assigned_to: str
+    notes: str
+    created_at: datetime
+    updated_at: datetime
+    created_by: str
 
 
 class BlockedUserEntry(BaseModel):
@@ -393,9 +432,30 @@ async def create_transaction(tx: TransactionRequest):
         "decision": result_decision,
         "risk_score": float(result_risk),
     }
-    _, _, ledger_hash = await append_ledger_entry(db, tx_object_id=ins.inserted_id, tx_payload=ledger_payload, created_at=now)
-    # Store ledger hash back into transaction for easy retrieval
-    await db.transactions.update_one({"_id": ins.inserted_id}, {"$set": {"ledger_hash": ledger_hash}})
+    ledger_index, ledger_prev_hash, ledger_hash = await append_ledger_entry(
+        db, tx_object_id=ins.inserted_id, tx_payload=ledger_payload, created_at=now
+    )
+
+    # Deterministic "registry" tx hash: proof artifact even if on-chain reporting is disabled.
+    registry_tx_hash = blockchain_client.compute_tx_hash(
+        user_id=tx.user_id,
+        amount=float(tx.amount),
+        device_id=tx.device_id,
+        timestamp_iso=now.isoformat(),
+    )
+
+    # Store proof fields back into transaction for easy retrieval
+    await db.transactions.update_one(
+        {"_id": ins.inserted_id},
+        {
+            "$set": {
+                "ledger_hash": ledger_hash,
+                "ledger_index": ledger_index,
+                "ledger_prev_hash": ledger_prev_hash,
+                "registry_tx_hash": registry_tx_hash,
+            }
+        },
+    )
 
     # keep in-memory log for existing dashboard widgets
     _tx_counter += 1
@@ -422,6 +482,9 @@ async def create_transaction(tx: TransactionRequest):
         timestamp=now,
         tx_id=str(ins.inserted_id),
         ledger_hash=ledger_hash,
+        ledger_index=ledger_index,
+        ledger_prev_hash=ledger_prev_hash,
+        registry_tx_hash=registry_tx_hash,
         model_loaded=risk_engine._model.is_loaded,
         balance_before=float(balance_before),
         balance_after=float(balance_after) if balance_after is not None else None,
@@ -481,6 +544,185 @@ async def police_block_user(
     )
     return {"success": True, "user_id": req.user_id, "blocked_at": now}
 
+@app.post("/police/unblock-user")
+async def police_unblock_user(
+    req: PoliceUnblockUserRequest,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    blocked_by = _require_police(x_police_key, authorization)
+    db = app.state.db
+    res = await db.blocked_users.delete_one({"user_id": req.user_id})
+    return {"success": res.deleted_count > 0, "user_id": req.user_id, "unblocked_by": blocked_by}
+
+
+def _make_ticket_id(now: datetime) -> str:
+    ymd = now.strftime("%Y%m%d")
+    rand = random.randint(1000, 9999)
+    return f"TG-{ymd}-{rand}"
+
+
+@app.post("/police/tickets", response_model=PoliceTicket)
+async def police_create_ticket(
+    req: PoliceCreateTicketRequest,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    created_by = _require_police(x_police_key, authorization)
+    db = app.state.db
+    now = utc_now()
+
+    try:
+        oid = ObjectId(req.tx_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tx_id")
+
+    tx = await db.transactions.find_one({"_id": oid})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    existing = await db.police_tickets.find_one({"tx_id": req.tx_id, "status": {"$ne": "RESOLVED"}})
+    if existing:
+        existing["ticket_id"] = existing.get("ticket_id")
+        existing["tx_id"] = existing.get("tx_id")
+        existing["created_at"] = existing.get("created_at", now)
+        existing["updated_at"] = existing.get("updated_at", now)
+        return PoliceTicket(**existing)
+
+    # Generate unique ticket id (retry a few times to avoid collision)
+    ticket_id = _make_ticket_id(now)
+    for _ in range(5):
+        if await db.police_tickets.find_one({"ticket_id": ticket_id}) is None:
+            break
+        ticket_id = _make_ticket_id(now)
+
+    doc = {
+        "ticket_id": ticket_id,
+        "tx_id": req.tx_id,
+        "user_id": str(tx.get("user_id", "")),
+        "device_id": str(tx.get("device_id", "")),
+        "status": "OPEN",
+        "priority": req.priority,
+        "assigned_to": req.assigned_to,
+        "notes": req.notes or "",
+        "created_at": now,
+        "updated_at": now,
+        "created_by": created_by,
+    }
+    await db.police_tickets.insert_one(doc)
+    return PoliceTicket(**doc)
+
+
+@app.get("/police/tickets", response_model=List[PoliceTicket])
+async def police_list_tickets(
+    status: Optional[str] = None,
+    limit: int = 100,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    _require_police(x_police_key, authorization)
+    db = app.state.db
+    q: Dict[str, Any] = {}
+    if status and status.upper() in ("OPEN", "IN_PROGRESS", "RESOLVED"):
+        q["status"] = status.upper()
+    cursor = (
+        db.police_tickets.find(q)
+        .sort([("status", 1), ("priority", -1), ("updated_at", -1)])
+        .limit(max(1, min(limit, 500)))
+    )
+    out: List[PoliceTicket] = []
+    async for doc in cursor:
+        doc.pop("_id", None)
+        out.append(PoliceTicket(**doc))
+    return out
+
+
+@app.patch("/police/tickets/{ticket_id}", response_model=PoliceTicket)
+async def police_update_ticket(
+    ticket_id: str,
+    req: PoliceUpdateTicketRequest,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    _require_police(x_police_key, authorization)
+    db = app.state.db
+    now = utc_now()
+
+    patch: Dict[str, Any] = {"updated_at": now}
+    if req.status:
+        patch["status"] = req.status
+    if req.priority:
+        patch["priority"] = req.priority
+    if req.assigned_to is not None:
+        patch["assigned_to"] = req.assigned_to
+    if req.notes is not None:
+        patch["notes"] = req.notes
+
+    await db.police_tickets.update_one({"ticket_id": ticket_id}, {"$set": patch})
+    doc = await db.police_tickets.find_one({"ticket_id": ticket_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    doc.pop("_id", None)
+    return PoliceTicket(**doc)
+
+
+@app.get("/police/transactions/related")
+async def police_related_transactions(
+    tx_id: str,
+    limit: int = 50,
+    x_police_key: Optional[str] = Header(None),
+    authorization: Optional[str] = Header(None),
+):
+    _require_police(x_police_key, authorization)
+    db = app.state.db
+    now = utc_now()
+    start, end = _utc_day_range(now)
+
+    try:
+        oid = ObjectId(tx_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid tx_id")
+
+    seed = await db.transactions.find_one({"_id": oid})
+    if not seed:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    user_id = seed.get("user_id")
+    device_id = seed.get("device_id")
+    ip_hash = seed.get("ip_hash")
+    dev_fp_hash = seed.get("device_fingerprint_hash")
+
+    or_terms: List[Dict[str, Any]] = []
+    if user_id:
+        or_terms.append({"user_id": user_id})
+    if device_id:
+        or_terms.append({"device_id": device_id})
+    if ip_hash:
+        or_terms.append({"ip_hash": ip_hash})
+    if dev_fp_hash:
+        or_terms.append({"device_fingerprint_hash": dev_fp_hash})
+
+    if not or_terms:
+        return {"seed": {"tx_id": tx_id}, "related": [], "links": {}}
+
+    q = {"created_at": {"$gte": start, "$lte": end}, "$or": or_terms}
+    cursor = db.transactions.find(q).sort("created_at", -1).limit(max(1, min(limit, 200)))
+
+    related = []
+    async for doc in cursor:
+        txid = str(doc.pop("_id"))
+        doc["tx_id"] = txid
+        related.append(doc)
+
+    links = {
+        "user_id": user_id,
+        "device_id": device_id,
+        "ip_hash": ip_hash,
+        "device_fingerprint_hash": dev_fp_hash,
+        "ledger_hash": seed.get("ledger_hash"),
+        "registry_tx_hash": seed.get("registry_tx_hash"),
+    }
+    return {"seed": {"tx_id": tx_id, "user_id": user_id, "device_id": device_id}, "related": related, "links": links}
 
 @app.get("/police/blocked-users")
 async def police_list_blocked_users(

@@ -83,7 +83,10 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
         merchant_id: t.merchant_id,
         decision: t.decision,
         risk_score: t.risk_score,
-        timestamp: t.created_at
+        timestamp: t.created_at,
+        ledger_hash: t.ledger_hash,
+        ledger_index: t.ledger_index,
+        registry_tx_hash: t.registry_tx_hash
       })) as TransactionLogEntry[];
     }
     return transactions;
@@ -108,7 +111,11 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
         risk_score: Number(d.risk_score ?? 0),
         reason: String(d.reason ?? ''),
         latency_ms: Number(d.latency_ms ?? 0),
-        created_at: String(d.created_at ?? d.timestamp ?? new Date().toISOString())
+        created_at: String(d.created_at ?? d.timestamp ?? new Date().toISOString()),
+        ledger_hash: d.ledger_hash ? String(d.ledger_hash) : undefined,
+        ledger_index: typeof d.ledger_index === 'number' ? d.ledger_index : undefined,
+        ledger_prev_hash: d.ledger_prev_hash ? String(d.ledger_prev_hash) : undefined,
+        registry_tx_hash: d.registry_tx_hash ? String(d.registry_tx_hash) : undefined
       }));
       setTodayHistory(normalized);
     } catch {
@@ -167,12 +174,7 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
       const scored = (await scoreRes.json()) as CheckTransactionResult;
       setResult(scored);
 
-      // Persist to MongoDB ledger only if not BLOCKed (demo policy).
-      if (scored.decision === 'BLOCK') {
-        await refreshToday();
-        return;
-      }
-
+      // Always persist to MongoDB ledger for an audit trail (including BLOCKed attempts).
       const res = await fetch(apiUrl('/transactions'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -640,6 +642,42 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
                       </div>
                     )}
 
+                    {(result.ledger_hash || result.registry_tx_hash) && (
+                      <div className="rounded-xl border border-slate-800 bg-slate-950/30 p-3 text-left text-[11px]">
+                        <div className="text-slate-400 font-semibold mb-1">Blockchain proof (demo ledger)</div>
+                        <div className="space-y-1 text-slate-300">
+                          {typeof result.ledger_index === 'number' && (
+                            <div>
+                              <span className="text-slate-500">Block</span>{' '}
+                              <span className="font-mono text-slate-200">#{result.ledger_index}</span>
+                            </div>
+                          )}
+                          {result.ledger_hash && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-slate-500">Ledger hash</span>
+                              <span className="font-mono text-slate-200 truncate max-w-[220px]" title={result.ledger_hash}>
+                                {result.ledger_hash}
+                              </span>
+                            </div>
+                          )}
+                          {result.registry_tx_hash && (
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-slate-500">Registry tx hash</span>
+                              <span
+                                className="font-mono text-slate-200 truncate max-w-[220px]"
+                                title={result.registry_tx_hash}
+                              >
+                                {result.registry_tx_hash}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                        <div className="mt-2 text-[10px] text-slate-500">
+                          Stored even when blocked, for audit + non-repudiation.
+                        </div>
+                      </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-2 pt-1">
                       <button
                         type="button"
@@ -719,6 +757,26 @@ export const WalletView: React.FC<Props> = ({ walletId, onWalletIdChange, transa
                         {tx.decision === 'BLOCK' && <span className="text-block font-semibold">BLOCK</span>}
                         <span className="text-slate-500"> • risk {tx.risk_score.toFixed(2)}</span>
                       </div>
+                      {(tx.ledger_hash || tx.registry_tx_hash) && (
+                        <div className="mt-1 text-[10px] text-slate-500">
+                          Proof:{' '}
+                          {typeof tx.ledger_index === 'number' && (
+                            <span className="text-slate-400">
+                              block <span className="font-mono text-slate-300">#{tx.ledger_index}</span> •{' '}
+                            </span>
+                          )}
+                          {tx.ledger_hash && (
+                            <span className="font-mono text-slate-300" title={tx.ledger_hash}>
+                              {tx.ledger_hash.slice(0, 18)}…
+                            </span>
+                          )}
+                          {!tx.ledger_hash && tx.registry_tx_hash && (
+                            <span className="font-mono text-slate-300" title={tx.registry_tx_hash}>
+                              {tx.registry_tx_hash.slice(0, 18)}…
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ))}
                   {mergedHistory.length === 0 && (

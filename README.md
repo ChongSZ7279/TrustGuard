@@ -292,10 +292,33 @@ Backend endpoints (prefer `Authorization: Bearer <token>` matching `POLICE_BEARE
 - `GET /police/transactions/today` → all transactions **today only**
 - `GET /police/blocked-users` → list blocked users
 - `POST /police/block-user` → block a user by `user_id` + reason
+- `POST /police/unblock-user` → unblock a user by `user_id`
+- `POST /police/tickets` → create (or return existing) investigation ticket for a transaction
+- `GET /police/tickets?status=OPEN|IN_PROGRESS|RESOLVED` → ticket queue
+- `PATCH /police/tickets/{ticket_id}` → update ticket (status/priority/assigned_to/notes)
+- `GET /police/transactions/related?tx_id=...` → fetch linked transactions trail (today-only) by shared identifiers
 
 Policy behavior:
 
 - If a user is blocked, `/transactions` and `/check-transaction` will always return `decision="BLOCK"` for that user.
+
+#### 6.1 Ticket queue + blockchain-linked trail
+
+The Police console includes a **Tickets** view:
+
+- Tickets are stored in MongoDB (`police_tickets`) and behave like a real queue:
+  - `OPEN` → newly created
+  - `IN_PROGRESS` → being worked
+  - `RESOLVED` → closed
+- Clicking a ticket navigates back to the console and loads:
+  - the ticket’s transaction (`tx_id`)
+  - a **related transaction trail** derived from the persisted “mini blockchain” audit fields (same user/device + hashed signals).
+
+MongoDB collections used:
+
+- `police_tickets`: persisted ticket queue
+- `transactions`: transaction history (today-only visibility)
+- `ledger`: tamper-evident hash chain per transaction
 
 ### 7. MongoDB + Ledger (“Mini Blockchain”)
 

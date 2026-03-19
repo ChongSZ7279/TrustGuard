@@ -10,6 +10,9 @@ export interface TransactionLogEntry {
   decision: Decision;
   risk_score: number;
   timestamp: string;
+  ledger_hash?: string;
+  ledger_index?: number;
+  registry_tx_hash?: string;
 }
 
 export interface OverviewStats {
@@ -27,6 +30,9 @@ export interface CheckTransactionResult {
   latency_ms?: number;
   tx_id?: string;
   ledger_hash?: string;
+  ledger_index?: number;
+  ledger_prev_hash?: string;
+  registry_tx_hash?: string;
   model_loaded?: boolean;
   balance_before?: number;
   balance_after?: number;
@@ -54,6 +60,9 @@ export interface PersistedTransaction {
   latency_ms: number;
   created_at: string;
   ledger_hash?: string;
+  ledger_index?: number;
+  ledger_prev_hash?: string;
+  registry_tx_hash?: string;
 }
 
 export interface BlockedUserEntry {
@@ -61,6 +70,36 @@ export interface BlockedUserEntry {
   reason: string;
   blocked_at: string;
   blocked_by: string;
+}
+
+export type TicketStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED';
+export type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export interface PoliceTicket {
+  ticket_id: string;
+  tx_id: string;
+  user_id: string;
+  device_id: string;
+  status: TicketStatus;
+  priority: TicketPriority;
+  assigned_to: string;
+  notes: string;
+  created_at: string;
+  updated_at: string;
+  created_by: string;
+}
+
+export interface RelatedTransactionsResponse {
+  seed: { tx_id: string; user_id?: string; device_id?: string };
+  links: {
+    user_id?: string;
+    device_id?: string;
+    ip_hash?: string | null;
+    device_fingerprint_hash?: string | null;
+    ledger_hash?: string | null;
+    registry_tx_hash?: string | null;
+  };
+  related: any[];
 }
 
 export interface WalletUser {
